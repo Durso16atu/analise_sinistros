@@ -56,6 +56,10 @@ class ChainLadder:
         self._cumulative_factors: Optional[pd.Series] = None
         self._projected_triangle: Optional[pd.DataFrame] = None
         self._ibnr_summary: Optional[pd.DataFrame] = None
+        self._sigma_squared: Optional[pd.Series] = None
+        self._mack_origin_summary: Optional[pd.DataFrame] = None
+        self._mack_covariance_matrix: Optional[pd.DataFrame] = None
+        self._mack_summary: Optional[pd.DataFrame] = None
 
     def _prepare_dataframe(
         self,
@@ -281,14 +285,372 @@ class ChainLadder:
         """Retorna o montante total de sinistros acumulados observados na diagonal mais recente."""
         return float(self.ibnr_summary["Ultimo_Sinistro_Obs"].sum())
 
+    # ==========================================================================
+    # MODELAGEM ESTOCÁSTICA - MÉTODO DE THOMAS MACK (1993)
+    # ==========================================================================
+
+    def calculate_sigma_squared(
+        self,
+        extrapolation_method: str = "mack",
+        extrapolation_value: Optional[float] = None,
+    ) -> pd.Series:
+        """
+        Calcula os estimadores de variância residual sigma_j^2 para cada coluna de desenvolvimento,
+        conforme o modelo estocástico de Thomas Mack (1993).
+
+        Para colunas com graus de liberdade suficientes (m_j - 1 > 0):
+            sigma_j^2 = (1 / (m_j - 1)) * sum_{i} C_{i, j} * ((C_{i, j+1} / C_{i, j}) - f_j)^2
+        onde m_j é o número de pares observados no período de transição j -> j+1.
+
+        Para a última coluna de transição (j = n-2 em índice 0, ou seja, j = n-1 em notação 1-indexada),
+        onde m_j = 1 e graus de liberdade = 0:
+        - Se extrapolation_value for informado, utiliza esse valor numérico.
+        - Se extrapolation_method == "mack":
+            * Se f_j == 1.0: sigma_j^2 = 0.0
+            * Se existirem pelo menos 2 sigmas anteriores válidos (sigma_{j-2}^2 e sigma_{j-1}^2):
+              sigma_j^2 = min(sigma_{j-1}^4 / sigma_{j-2}^2, min(sigma_{j-2}^2, sigma_{j-1}^2))
+            * Se houver apenas 1 anterior: sigma_j^2 = sigma_{j-1}^2
+            * Se nenhum: sigma_j^2 = 0.0
+        - Se extrapolation_method == "min":
+            * min dos 2 anteriores (ou o anterior caso exista apenas 1).
+        - Se extrapolation_method == "log_linear":
+            * Ajusta regressão linear ln(sigma_k^2) = a + b*k sobre os valores válidos e extrapola.
+
+        Retorno:
+        --------
+        pd.Series : Estimadores sigma_j^2 para cada período de transição.
+        """
+        factors = self.individual_factors.values
+        sigmas = []
+        transition_names = list(self.individual_factors.index)
+
+        for j in range(self.n_devs - 1):
+            col_curr = self.triangle_original.iloc[:, j]
+            col_next = self.triangle_original.iloc[:, j + 1]
+
+            valid_mask = col_curr.notna() & col_next.notna() & (col_curr > 0)
+            valid_curr = col_curr[valid_mask]
+            valid_next = col_next[valid_mask]
+
+            m_j = len(valid_curr)
+            f_j = factors[j]
+
+            if m_j > 1:
+                residuals = (valid_next / valid_curr) - f_j
+                sigma2 = float(((valid_curr * (residuals ** 2)).sum()) / (m_j - 1))
+            else:
+                # Tratamento de extrapolação para m_j <= 1 (típico para j = n - 2)
+                if extrapolation_value is not None:
+                    sigma2 = float(extrapolation_value)
+                elif extrapolation_method == "mack":
+                    if np.isclose(f_j, 1.0):
+                        sigma2 = 0.0
+                    elif len(sigmas) >= 2 and sigmas[-2] > 0:
+                        s_prev2 = sigmas[-2]
+                        s_prev1 = sigmas[-1]
+                        ratio = (s_prev1 ** 2) / s_prev2
+                        sigma2 = float(min(ratio, min(s_prev2, s_prev1)))
+                    elif len(sigmas) >= 1:
+                        sigma2 = float(sigmas[-1])
+                    else:
+                        sigma2 = 0.0
+                elif extrapolation_method == "min":
+                    if len(sigmas) >= 2:
+                        sigma2 = float(min(sigmas[-1], sigmas[-2]))
+                    elif len(sigmas) >= 1:
+                        sigma2 = float(sigmas[-1])
+                    else:
+                        sigma2 = 0.0
+                elif extrapolation_method == "log_linear":
+                    valid_idx = [k for k, s in enumerate(sigmas) if s > 0]
+                    if len(valid_idx) >= 2:
+                        y = [np.log(sigmas[k]) for k in valid_idx]
+                        poly = np.polyfit(valid_idx, y, deg=1)
+                        sigma2 = float(np.exp(poly[1] + poly[0] * j))
+                    elif len(sigmas) >= 1:
+                        sigma2 = float(sigmas[-1])
+                    else:
+                        sigma2 = 0.0
+                else:
+                    raise ValueError(f"Método de extrapolação '{extrapolation_method}' não suportado.")
+
+            sigmas.append(sigma2)
+
+        self._sigma_squared = pd.Series(
+            sigmas,
+            index=transition_names,
+            name="Mack_Residual_Variance_sigma_j2",
+        )
+        return self._sigma_squared
+
+    @property
+    def sigma_squared(self) -> pd.Series:
+        """Retorna os estimadores de variância residual sigma_j^2 de Mack."""
+        if self._sigma_squared is None:
+            self.calculate_sigma_squared()
+        return self._sigma_squared
+
+    @property
+    def sigma(self) -> pd.Series:
+        """Retorna o desvio padrão residual sigma_j de Mack."""
+        return np.sqrt(self.sigma_squared).rename("Mack_Residual_Std_sigma_j")
+
+    def calculate_mack_origin_mse(self) -> pd.DataFrame:
+        """
+        Calcula o erro médio quadrático de predição (m.s.e.), erro padrão (s.e.)
+        e coeficiente de variação (CV) individual para cada safra (ano de ocorrência),
+        decompondo entre risco de processo e risco de parâmetro conforme Thomas Mack (1993, Teorema 1).
+
+        Fórmula de Mack (1993, fórmula 8):
+            m.s.e.(C_{i, n}) = (C_{i, n})^2 * sum_{k=I_i}^{n-1} (sigma_k^2 / f_k^2) * [ (1 / C_{i, k}) + (1 / S_k) ]
+        onde:
+            - C_{i, k} é o sinistro acumulado estimado no estágio k (termo de Risco de Processo: 1 / C_{i, k}).
+            - S_k = sum_{m=1}^{n-k} C_{m, k} é a soma dos sinistros observados na coluna k (termo de Risco de Parâmetro: 1 / S_k).
+
+        Retorno:
+        --------
+        pd.DataFrame : Tabela detalhada por safra com Sinistro Final, IBNR, Risco de Processo,
+                       Risco de Parâmetro, MSE, Erro Padrão (s.e.) e CV (%).
+        """
+        f = self.individual_factors.values
+        sig2 = self.sigma_squared.values
+        cols = self.triangle_original.columns
+        origins = self.triangle_original.index
+
+        # Pré-cálculo de S_k (soma das observações pareadas da coluna k)
+        S = np.zeros(self.n_devs - 1, dtype=float)
+        for k in range(self.n_devs - 1):
+            col_curr = self.triangle_original.iloc[:, k]
+            col_next = self.triangle_original.iloc[:, k + 1]
+            valid_mask = col_curr.notna() & col_next.notna() & (col_curr > 0)
+            S[k] = float(col_curr[valid_mask].sum())
+
+        records = []
+        for i, origin in enumerate(origins):
+            row = self.triangle_original.iloc[i]
+            valid_series = row.dropna()
+
+            if valid_series.empty:
+                I_i = 0
+                latest_val = 0.0
+                latest_col = cols[0]
+            else:
+                latest_col = valid_series.index[-1]
+                I_i = cols.get_loc(latest_col)
+                latest_val = float(valid_series.iloc[-1])
+
+            factor_F = float(self.cumulative_factors[latest_col])
+            ultimate = float(latest_val * factor_F)
+            ibnr = float(ultimate - latest_val)
+
+            # Se a safra já atingiu o desenvolvimento final observado
+            if I_i >= self.n_devs - 1:
+                proc_var = 0.0
+                param_var = 0.0
+                mse = 0.0
+                se = 0.0
+                cv = 0.0
+            else:
+                sum_proc = 0.0
+                sum_param = 0.0
+                for k in range(I_i, self.n_devs - 1):
+                    # C_{i, k}: valor observado (em k == I_i) ou projetado (em k > I_i)
+                    C_ik = float(self.projected_triangle.iloc[i, k])
+                    term_weight = sig2[k] / (f[k] ** 2)
+                    sum_proc += term_weight / C_ik
+                    sum_param += term_weight / S[k]
+
+                proc_var = float((ultimate ** 2) * sum_proc)
+                param_var = float((ultimate ** 2) * sum_param)
+                mse = float(proc_var + param_var)
+                se = float(np.sqrt(mse))
+                cv = float((se / ibnr) * 100.0) if ibnr > 0 else 0.0
+
+            records.append({
+                "Safra": origin,
+                "Sinistro_Acumulado_Obs": latest_val,
+                "Ultimo_Periodo_Dev": latest_col,
+                "Fator_Fj": factor_F,
+                "Sinistro_Final_Ultimate": ultimate,
+                "Provisao_IBNR": ibnr,
+                "Risco_Processo_Var": proc_var,
+                "Risco_Parametro_Var": param_var,
+                "MSE": mse,
+                "Erro_Padrao_se": se,
+                "CV_pct": cv,
+            })
+
+        df = pd.DataFrame(records).set_index("Safra")
+        self._mack_origin_summary = df
+        return self._mack_origin_summary
+
+    @property
+    def mack_origin_summary(self) -> pd.DataFrame:
+        """Retorna o quadro de erros padrões e decomposição de variância por safra de Mack."""
+        if self._mack_origin_summary is None:
+            self.calculate_mack_origin_mse()
+        return self._mack_origin_summary
+
+    def calculate_mack_covariance_matrix(self) -> pd.DataFrame:
+        """
+        Calcula a matriz de covariância entre as provisões de IBNR e sinistros finais
+        das diferentes safras, conforme Thomas Mack (1993, Teorema 2):
+
+        Para i != k (safras distintas):
+            Cov(C_{i, n}, C_{k, n}) = C_{i, n} * C_{k, n} * sum_{j = max(I_i, I_k)}^{n-1} (sigma_j^2 / (f_j^2 * S_j))
+        Para i == k:
+            Cov(C_{i, n}, C_{i, n}) = m.s.e.(C_{i, n})
+
+        Retorno:
+        --------
+        pd.DataFrame : Matriz quadrada de covariância (n_origins x n_origins).
+        """
+        f = self.individual_factors.values
+        sig2 = self.sigma_squared.values
+        cols = self.triangle_original.columns
+        origins = self.triangle_original.index
+        n_origins = len(origins)
+
+        # Pré-cálculo de S_j
+        S = np.zeros(self.n_devs - 1, dtype=float)
+        for j in range(self.n_devs - 1):
+            col_curr = self.triangle_original.iloc[:, j]
+            col_next = self.triangle_original.iloc[:, j + 1]
+            valid_mask = col_curr.notna() & col_next.notna() & (col_curr > 0)
+            S[j] = float(col_curr[valid_mask].sum())
+
+        # Índices de última observação e Ultimates por safra
+        last_obs_idx = np.zeros(n_origins, dtype=int)
+        ultimates = np.zeros(n_origins, dtype=float)
+        mses = self.mack_origin_summary["MSE"].values
+
+        for i in range(n_origins):
+            valid_series = self.triangle_original.iloc[i].dropna()
+            if valid_series.empty:
+                last_obs_idx[i] = 0
+            else:
+                last_col = valid_series.index[-1]
+                last_obs_idx[i] = cols.get_loc(last_col)
+            ultimates[i] = self.mack_origin_summary.iloc[i]["Sinistro_Final_Ultimate"]
+
+        cov_matrix = np.zeros((n_origins, n_origins), dtype=float)
+
+        for i in range(n_origins):
+            for k in range(n_origins):
+                if i == k:
+                    cov_matrix[i, k] = mses[i]
+                else:
+                    j_start = max(last_obs_idx[i], last_obs_idx[k])
+                    if j_start >= self.n_devs - 1:
+                        cov_matrix[i, k] = 0.0
+                    else:
+                        sum_cov = 0.0
+                        for j in range(j_start, self.n_devs - 1):
+                            sum_cov += sig2[j] / ((f[j] ** 2) * S[j])
+                        cov_matrix[i, k] = float(ultimates[i] * ultimates[k] * sum_cov)
+
+        df_cov = pd.DataFrame(cov_matrix, index=origins, columns=origins)
+        self._mack_covariance_matrix = df_cov
+        return self._mack_covariance_matrix
+
+    @property
+    def mack_covariance_matrix(self) -> pd.DataFrame:
+        """Retorna a matriz de covariância entre safras de Mack."""
+        if self._mack_covariance_matrix is None:
+            self.calculate_mack_covariance_matrix()
+        return self._mack_covariance_matrix
+
+    @property
+    def total_mack_mse(self) -> float:
+        """
+        Retorna o erro médio quadrático de predição total consolidado da provisão (Mack, 1993):
+        m.s.e.(R_total) = sum_{i} m.s.e.(R_i) + 2 * sum_{i < k} Cov(R_i, R_k)
+        """
+        return float(self.mack_covariance_matrix.values.sum())
+
+    @property
+    def total_mack_se(self) -> float:
+        """Retorna o erro padrão total da provisão agregada de IBNR: s.e.(R_total)."""
+        return float(np.sqrt(self.total_mack_mse))
+
+    @property
+    def total_mack_cv(self) -> float:
+        """Retorna o coeficiente de variação total da provisão agregada de IBNR (em fração decimal)."""
+        return float(self.total_mack_se / self.total_ibnr) if self.total_ibnr > 0 else 0.0
+
+    @property
+    def total_mack_process_variance(self) -> float:
+        """Retorna o risco de processo agregado total (soma das variâncias de processo individuais)."""
+        return float(self.mack_origin_summary["Risco_Processo_Var"].sum())
+
+    @property
+    def total_mack_parameter_variance(self) -> float:
+        """
+        Retorna o risco de parâmetro agregado total (incluindo todas as covariâncias entre safras):
+        Var_param(R_total) = m.s.e.(R_total) - Var_proc(R_total).
+        """
+        return float(self.total_mack_mse - self.total_mack_process_variance)
+
+    def summary_mack(self, include_total: bool = True) -> pd.DataFrame:
+        """
+        Gera uma tabela completa consolidando estimativas pontuais e métricas estocásticas de Mack:
+        Safra, Sinistro Acumulado Observado, Fator F_j, Sinistro Final Projetado,
+        Provisão IBNR, Erro Padrão (s.e.) e CV (%).
+
+        Parâmetros:
+        -----------
+        include_total : bool, default=True
+            Se True, inclui linha ao final com os totais da carteira e o s.e. total com covariâncias.
+
+        Retorno:
+        --------
+        pd.DataFrame : Tabela consolidada com as colunas especificadas.
+        """
+        origin_df = self.mack_origin_summary
+
+        rows = []
+        for origin in origin_df.index:
+            row = origin_df.loc[origin]
+            rows.append({
+                "Safra": origin,
+                "Sinistro Acumulado Observado": row["Sinistro_Acumulado_Obs"],
+                "Fator F_j": row["Fator_Fj"],
+                "Sinistro Final Projetado": row["Sinistro_Final_Ultimate"],
+                "Provisão IBNR": row["Provisao_IBNR"],
+                "Erro Padrão (s.e.)": row["Erro_Padrao_se"],
+                "CV (%)": row["CV_pct"],
+            })
+
+        if include_total:
+            total_obs = self.total_observed
+            total_ult = self.total_ultimate
+            total_ibnr = self.total_ibnr
+            total_se = self.total_mack_se
+            total_cv_pct = self.total_mack_cv * 100.0
+            avg_F = (total_ult / total_obs) if total_obs > 0 else self.tail_factor
+
+            rows.append({
+                "Safra": "Total",
+                "Sinistro Acumulado Observado": total_obs,
+                "Fator F_j": avg_F,
+                "Sinistro Final Projetado": total_ult,
+                "Provisão IBNR": total_ibnr,
+                "Erro Padrão (s.e.)": total_se,
+                "CV (%)": total_cv_pct,
+            })
+
+        df_result = pd.DataFrame(rows).set_index("Safra", drop=False)
+        self._mack_summary = df_result
+        return df_result
+
     def format_results(self) -> str:
-        """Gera um relatório textual detalhado e formatado dos resultados."""
+        """Gera um relatório textual detalhado e formatado dos resultados determinísticos e estocásticos."""
         sep = "=" * 80
         sub_sep = "-" * 80
 
         lines = [
             sep,
-            "                   RELATÓRIO ATUARIAL - MÉTODO CHAIN LADDER",
+            "                   RELATÓRIO ATUARIAL - MÉTODO CHAIN LADDER & MACK",
             sep,
             "",
             "1. TRIÂNGULO DE DESENVOLVIMENTO ACUMULADO ORIGINAL:",
@@ -335,11 +697,62 @@ class ChainLadder:
 
         lines.extend([
             "",
-            "6. TOTAIS CONSOLIDADOS DA CARTEIRA:",
+            "6. TOTAIS CONSOLIDADOS DETERMINÍSTICOS DA CARTEIRA:",
             sub_sep,
             f"   Total de Sinistros Observados (Última Posição): R$ {self.total_observed:15,.2f}",
             f"   Total de Sinistros Finais Estimados (Ultimate): R$ {self.total_ultimate:15,.2f}",
             f"   PROVISÃO TOTAL DE IBNR REQUERIDA             : R$ {self.total_ibnr:15,.2f}",
+            "",
+            "7. MODELAGEM ESTOCÁSTICA DE THOMAS MACK (1993):",
+            sub_sep,
+            "7.1 Desvios Padrão Residuais por Coluna de Desenvolvimento (sigma_j):",
+        ])
+
+        sig_df = pd.DataFrame({
+            "Período de Transição": self.sigma_squared.index,
+            "Fator f_j": self.individual_factors.values,
+            "sigma_j^2": self.sigma_squared.values,
+            "sigma_j": self.sigma.values,
+        })
+        lines.append(sig_df.to_string(index=False, formatters={
+            "Fator f_j": "{:,.4f}".format,
+            "sigma_j^2": "{:,.4f}".format,
+            "sigma_j": "{:,.4f}".format,
+        }))
+
+        lines.extend([
+            "",
+            "7.2 Quadro Resumo de Reservas e Erros Padrão de Mack:",
+            sub_sep,
+        ])
+
+        mack_table = self.summary_mack(include_total=True).copy()
+        mack_formatted = pd.DataFrame({
+            "Safra": mack_table["Safra"],
+            "Sinistro Acumulado Obs": mack_table["Sinistro Acumulado Observado"].map("{:,.2f}".format),
+            "Fator F_j": mack_table["Fator F_j"].map("{:,.4f}".format),
+            "Sinistro Final Projetado": mack_table["Sinistro Final Projetado"].map("{:,.2f}".format),
+            "Provisão IBNR": mack_table["Provisão IBNR"].map("{:,.2f}".format),
+            "Erro Padrão (s.e.)": mack_table["Erro Padrão (s.e.)"].map("{:,.2f}".format),
+            "CV (%)": mack_table["CV (%)"].map("{:,.2f}%".format),
+        }).set_index("Safra")
+        lines.append(mack_formatted.to_string())
+
+        proc_pct = (self.total_mack_process_variance / self.total_mack_mse) * 100.0 if self.total_mack_mse > 0 else 0.0
+        param_pct = (self.total_mack_parameter_variance / self.total_mack_mse) * 100.0 if self.total_mack_mse > 0 else 0.0
+        ci_lower = max(0.0, self.total_ibnr - 1.96 * self.total_mack_se)
+        ci_upper = self.total_ibnr + 1.96 * self.total_mack_se
+
+        lines.extend([
+            "",
+            "7.3 Decomposição da Incerteza e Intervalo de Confiança (Mack):",
+            sub_sep,
+            f"   Risco de Processo Total (Variância)       : R$ {self.total_mack_process_variance:15,.2f} ({proc_pct:5.1f}%)",
+            f"   Risco de Parâmetro Total (com Covariâncias): R$ {self.total_mack_parameter_variance:15,.2f} ({param_pct:5.1f}%)",
+            f"   MSE Total Consolidado m.s.e.(R_total)     : R$ {self.total_mack_mse:15,.2f}",
+            f"   ERRO PADRÃO TOTAL CONSOLIDADO s.e.(R_total): R$ {self.total_mack_se:15,.2f}",
+            f"   COEFICIENTE DE VARIAÇÃO TOTAL (CV)        : {self.total_mack_cv * 100.0:14.2f}%",
+            f"   Intervalo de Confiança 95% Aprox. (Normal): [R$ {ci_lower:,.2f} ; R$ {ci_upper:,.2f}]",
             sep,
         ])
 
@@ -369,13 +782,13 @@ if __name__ == "__main__":
         columns=periodos_desenvolvimento,
     )
 
-    print("\nExecutando triangulação via Chain Ladder com cauda de 1.02 (2% adicional na cauda)...\n")
+    print("\nExecutando triangulação via Chain Ladder & Mack (1993) [Tail Factor = 1.0]...\n")
 
-    # Instanciando o modelo com tail factor prudencial de 1.02
     modelo = ChainLadder(
         triangle=triangulo_df,
-        tail_factor=1.02,
+        tail_factor=1.0,
     )
 
     # Exibe o relatório formatado completo
     print(modelo.format_results())
+
