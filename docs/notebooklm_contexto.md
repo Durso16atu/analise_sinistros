@@ -1,8 +1,30 @@
-# Fundamentação Teórica: Método Chain Ladder e Provisão de IBNR
+# Dossiê Técnico & Fundamentação Teórica: Método Chain Ladder e Modelo de Mack (1993)
 
-> **Guia Conceitual e Atuarial para NotebookLM**  
-> **Tema:** Triangulação de Sinistros, Modelo de Mack, Estimativa de Sinistros Finais (*Ultimate*) e Cálculo de IBNR (*Incurred But Not Reported*).  
-> **Referência de Implementação:** [`src/chain_ladder.py`](file:///home/jose-eduardo/agente_antigravity/analise_sinistros/src/chain_ladder.py)
+> **Documento Estruturado para Indexação e Consulta Contínua via Google Drive & NotebookLM**  
+> **Área:** Ciências Atuariais (Seguros Não-Vida / Provisões Técnicas & Teoria do Risco)  
+> **Autor:** José Eduardo D'Urso — Estudante de Ciências Atuariais da Universidade Federal de Minas Gerais (UFMG)  
+> **Projeto:** `analise_sinistros` (Triangulação de Sinistros, IBNR e Incerteza Estocástica)  
+> **Implementação em Python:** [`src/chain_ladder.py`](file:///home/jose-eduardo/agente_antigravity/analise_sinistros/src/chain_ladder.py)  
+> **Aplicação Web (GitHub Pages):** [`docs/index.html`](file:///home/jose-eduardo/agente_antigravity/analise_sinistros/docs/index.html) | [Live Demo](https://durso16atu.github.io/analise_sinistros/)  
+> **Data de Revisão:** Outubro de 2026  
+
+---
+
+## 🧭 Sumário Executivo Conceitual (Pronto para RAG & NotebookLM)
+
+Este sumário sintetiza os conceitos centrais do projeto em tópicos diretos para facilitar respostas assertivas e contextualizadas por agentes inteligentes no NotebookLM:
+
+* **Objeto do Estudo:** Apuração atuarial da provisão de **IBNR** (*Incurred But Not Reported* – Sinistros Ocorridos Mas Não Avisados) e estimativa dos sinistros finais (*Ultimate*) em carteiras de seguros não-vida e resseguros.
+* **Ferramenta Fundamental:** Triângulo de Sinistros Acumulados (*Run-Off Triangle*), onde as linhas representam os anos de ocorrência ($i$), as colunas a maturidade de desenvolvimento ($j$) e as diagonais os períodos contábeis ($k = i + j - 1$).
+* **Motor Determinístico (Chain Ladder):** Utiliza fatores de desenvolvimento de idade para idade ($f_j$) calculados via média ponderada pelo volume acumulado histórico, projetando o triângulo inferior até a extinção das obrigações com suporte a fator de cauda (*tail factor*).
+* **Motor Estocástico (Thomas Mack, 1993):** Modelo não-paramétrico (livre de hipótese distribucional) que deduz analiticamente o erro médio quadrático de predição ($m.s.e.$) e o erro padrão ($s.e.$) da provisão de IBNR, tanto para safras individuais quanto para a carteira total consolidada.
+* **Decomposição da Incerteza:** Separa analiticamente a variância em:
+  1. *Risco de Processo:* Flutuação aleatória intrínseca da ocorrência futura dos sinistros.
+  2. *Risco de Parâmetro:* Incerteza amostral decorrente do número finito de observações históricas usadas para calibrar $f_j$.
+* **Correlação entre Safras:** Safras independentes possuem estimativas de IBNR correlacionadas positivamente porque compartilham os mesmos estimadores $\hat{f}_j$. A fórmula de Mack computa a matriz completa de covariância entre anos de ocorrência.
+* **Conformidade Regulatória:**
+  * **SUSEP (Circular 643/2021 & Resolução CNSP 321/2015):** Exige constituição prudencial de IBNR e testes de consistência da variabilidade das estimativas atuariais.
+  * **IFRS 17:** O Chain Ladder fornece o *Best Estimate Liabilities* (BEL) e o erro padrão de Mack subsidia o cálculo do *Risk Adjustment* (RA) via VaR.
 
 ---
 
@@ -125,66 +147,7 @@ $$\text{IBNR}_{\text{total}} = \sum_{i=1}^{n} \text{IBNR}_i$$
 
 ---
 
-## 5. Exemplo Numérico Passo a Passo
-
-Considere o triângulo acumulado de 3 anos de ocorrência e 3 estágios de desenvolvimento (valores em milhares de reais):
-
-| Ano Ocorrência | Dev 1 | Dev 2 | Dev 3 |
-| :--- | :---: | :---: | :---: |
-| **2022** | 1.000 | 1.500 | 1.800 |
-| **2023** | 1.200 | 1.860 | — |
-| **2024** | 1.400 | — | — |
-
-Assumindo `tail_factor = 1.0`:
-
-### Passo 1: Fatores Individuais ($f_j$)
-* $f_1$ (Dev 1 $\to$ Dev 2):
-  $$f_1 = \frac{C_{2022, 2} + C_{2023, 2}}{C_{2022, 1} + C_{2023, 1}} = \frac{1.500 + 1.860}{1.000 + 1.200} = \frac{3.360}{2.200} = 1{,}5273$$
-* $f_2$ (Dev 2 $\to$ Dev 3):
-  $$f_2 = \frac{C_{2022, 3}}{C_{2022, 2}} = \frac{1.800}{1.500} = 1{,}2000$$
-
-### Passo 2: Fatores Acumulados ($F_j$)
-* $F_3 = \text{tail\_factor} = 1{,}0000$
-* $F_2 = f_2 \times F_3 = 1{,}2000 \times 1{,}0000 = 1{,}2000$
-* $F_1 = f_1 \times F_2 = 1{,}5273 \times 1{,}2000 = 1{,}8328$
-
-### Passo 3: Projeção de Ultimate e IBNR
-* **Ano 2022 (Dev 3):**
-  * Último observado: $1.800$
-  * Fator $F_3 = 1{,}0000$
-  * $\text{Ultimate}_{2022} = 1.800 \times 1{,}0000 = 1.800{,}00$
-  * $\text{IBNR}_{2022} = 1.800 - 1.800 = 0{,}00$
-* **Ano 2023 (Dev 2):**
-  * Último observado: $1.860$
-  * Fator $F_2 = 1{,}2000$
-  * $\text{Ultimate}_{2023} = 1.860 \times 1{,}2000 = 2.232{,}00$
-  * $\text{IBNR}_{2023} = 2.232{,}00 - 1.860 = 372{,}00$
-* **Ano 2024 (Dev 1):**
-  * Último observado: $1.400$
-  * Fator $F_1 = 1{,}8328$
-  * $\text{Ultimate}_{2024} = 1.400 \times 1{,}8328 = 2.565{,}92$
-  * $\text{IBNR}_{2024} = 2.565{,}92 - 1.400 = 1.165{,}92$
-
-**Provisão Total de IBNR:** $0{,}00 + 372{,}00 + 1.165{,}92 = \mathbf{1.537{,}92}$
-
----
-
-## 6. Limitações Críticas e Boas Práticas Atuariais
-
-Embora seja o método mais difundido mundialmente, o Chain Ladder possui vulnerabilidades operacionais que exigem julgamento atuarial crítico:
-
-1. **Sensibilidade em Anos Muito Recentes (*Leveraging Effect*):**
-   * No ano mais recente ($i = n$), o estágio de maturidade é 1. Como $F_1$ costuma ser expressivo, qualquer oscilação pontual aleatória em $C_{n, 1}$ é multiplicada e amplificada na estimativa do *Ultimate*. Em anos imaturos, métodos como **Bornhuetter-Ferguson (BF)** ou **Cape Cod**, que incorporam o prêmio ganho e uma sinistralidade a priori, tendem a ser mais estáveis.
-2. **Alterações nos Procedimentos de Regulação de Sinistros:**
-   * Se a equipe de sinistros acelerar os avisos ou pagamentos (ou, ao contrário, houver represamento), a velocidade histórica de desenvolvimento é distorcida, fazendo com que o Chain Ladder superestime ou subestime severamente as provisões.
-3. **Presença de Sinistros Atípicos (*Outliers* ou Grandes Sinistros):**
-   * Sinistros de severidade extraordinária distorcem a razão entre colunas. A prática atuarial recomenda expurgar os sinistros atípicos, calcular o Chain Ladder sobre a massa homogênea (sinistros de atrito) e adicionar a reserva de grandes sinistros individualmente.
-4. **Valores Negativos:**
-   * Recuperações judiciais, ressarcimentos ou salvados que superem os sinistros de um período podem gerar incrementos negativos, exigindo tratamento específico para evitar inconsistências nas divisões.
-
----
-
-## 7. Modelagem Estocástica de Thomas Mack (1993)
+## 5. Modelagem Estocástica de Thomas Mack (1993)
 
 Embora o método Chain Ladder tradicional produza uma estimativa pontual para a provisão de IBNR, ele não fornece intrinsecamente uma medida de incerteza ou variabilidade estatística associada a essa projeção.
 
@@ -192,36 +155,11 @@ Em seu artigo seminal *"Distribution-free Calculation of the Standard Error of C
 1. O estimador não tendencioso da **variância residual** de cada período de desenvolvimento ($\hat{\sigma}_j^2$);
 2. O **erro médio quadrático de predição** ($m.s.e.$) e o **erro padrão** ($s.e.$) da provisão de cada safra individualmente;
 3. A decomposição explícita da incerteza entre **Risco de Processo** e **Risco de Parâmetro**;
-4. A **matriz de covariância** entre safras distintas e o **erro padrão consolidado da provisão total agregada** ($s.e.(\hat{R}_{total})$).
+4. A **matriz de covariância** entre safras distintas e o **erro padrão consolidado da provisão total agregada** ($s.e.(\hat{R}_{\text{total}})$).
 
 ---
 
-### 7.1 As Três Hipóteses Fundamentais de Mack
-
-Seja $C_{i,j}$ o montante de sinistros acumulados para o ano de ocorrência $i \in \{1, \dots, n\}$ e período de desenvolvimento $j \in \{1, \dots, n\}$. O conjunto de dados observados corresponde ao triângulo superior $D = \{C_{i,j} : i + j \le n + 1\}$.
-
-O modelo de Mack baseia-se em três premissas fundamentais:
-
-1. **Esperança Condicional (Fator de Desenvolvimento):**
-   $$E[C_{i, j+1} \mid C_{i,1}, \dots, C_{i,j}] = C_{i,j} \cdot f_j \quad (1 \le i \le n, \; 1 \le j \le n-1)$$
-   *Interpretação:* A expectativa do sinistro no período seguinte depende proporcionalmente do valor acumulado no estágio atual por meio de um multiplicador constante $f_j$, sem viés temporal adicional.
-
-2. **Independência entre Anos de Ocorrência:**
-   $$\{C_{i,1}, \dots, C_{i,n}\} \quad \text{são mutuamente independentes para diferentes safras } i.$$
-   *Interpretação:* A dinâmica de maturação de uma safra (ex.: 2021) não afeta diretamente o volume gerador de outra safra (ex.: 2023).
-
-3. **Heteroscedasticidade Proporcional ao Volume:**
-   $$\text{Var}(C_{i, j+1} \mid C_{i,1}, \dots, C_{i,j}) = C_{i,j} \cdot \sigma_j^2 \quad (1 \le i \le n, \; 1 \le j \le n-1)$$
-   *Interpretação:* A variância condicional não é constante, mas cresce linearmente com o volume acumulado $C_{i,j}$. Anos com maior volume financeiro exibem maior variância absoluta, mas menor variância relativa (coeficiente de variação decrescente com o volume).
-
-> **Propriedade Notável (BLUE):**  
-> Mack (1993) demonstrou que, sob as três hipóteses acima, o estimador clássico de Chain Ladder ponderado por volume:
-> $$\hat{f}_j = \frac{\sum_{i=1}^{n-j} C_{i, j+1}}{\sum_{i=1}^{n-j} C_{i, j}}$$
-> é o **Estimador Linear Não Tendencioso de Variância Mínima** (*Best Linear Unbiased Estimator - BLUE*) para $f_j$.
-
----
-
-### 7.2 Estimação dos Parâmetros de Variância ($\hat{\sigma}_j^2$) e Extrapolação
+### 5.1 Estimação dos Parâmetros de Variância ($\hat{\sigma}_j^2$) e Extrapolação
 
 Para cada transição $j \to j+1$, Mack propôs o estimador não tendencioso da variância residual:
 
@@ -231,7 +169,7 @@ $$\hat{\sigma}_j^2 = \frac{1}{n - j - 1} \sum_{i=1}^{n-j} C_{i, j} \left( \frac{
 * **Desvio Padrão Residual:** $\hat{\sigma}_j = \sqrt{\hat{\sigma}_j^2}$.
 
 #### O Problema da Última Transição ($j = n - 1$)
-Na última transição observada ($j = n - 1$, ou penúltima para a última coluna do triângulo), há apenas um único par de observações histórico disponível ($i = 1$). Portanto, $n - j = 1$, resultando em denominador $1 - 1 = 0$ (graus de liberdade nulos).
+Na última transição observada ($j = n - 1$), há apenas um único par de observações histórico disponível ($i = 1$). Portanto, $n - j = 1$, resultando em denominador $1 - 1 = 0$ (graus de liberdade nulos).
 
 Para contornar essa indeterminação, Mack sugeriu as seguintes técnicas de extrapolação:
 1. **Regra de Decaimento Exponencial de Mack (Padrão):**
@@ -243,12 +181,12 @@ Para contornar essa indeterminação, Mack sugeriu as seguintes técnicas de ext
 
 ---
 
-### 7.3 Erro Médio Quadrático de Predição ($m.s.e.$) e Erro Padrão ($s.e.$) por Safra
+### 5.2 Erro Médio Quadrático de Predição ($m.s.e.$) e Erro Padrão ($s.e.$) por Safra
 
 A provisão de IBNR para a safra $i$ é dada por $\hat{R}_i = \hat{C}_{i,n} - C_{i, I_i}$, onde $I_i = n + 1 - i$ é o último período observado de desenvolvimento da safra $i$.
 
 Como o montante observado $C_{i, I_i}$ é constante e conhecido na data base, a incerteza da provisão é idêntica à incerteza do sinistro final projetado $\hat{C}_{i,n}$:
-$$m.s.e.(\hat{R}_i) = E[(R_i - \hat{R}_i)^2 \mid D] = E[(C_{i,n} - \hat{C}_{i,n})^2 \mid D] = m.s.e.(\hat{C}_{i,n})$$
+$$m.s.e.(\hat{R}_i) = \mathbb{E}[(R_i - \hat{R}_i)^2 \mid D] = \mathbb{E}[(C_{i,n} - \hat{C}_{i,n})^2 \mid D] = m.s.e.(\hat{C}_{i,n})$$
 
 Thomas Mack deduziu a fórmula analítica recursiva (Mack, 1993, Teorema 1):
 $$m.s.e.(\hat{C}_{i,n}) = (\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\hat{\sigma}_k^2}{\hat{f}_k^2} \left( \frac{1}{\hat{C}_{i,k}} + \frac{1}{S_k} \right)$$
@@ -260,11 +198,11 @@ onde:
 
 ---
 
-### 7.4 Decomposição Analítica: Risco de Processo vs. Risco de Parâmetro
+### 5.3 Decomposição Analítica: Risco de Processo vs. Risco de Parâmetro
 
 A fórmula do MSE decompõe-se elegantemente em dois componentes atuariais independentes:
 
-$$m.s.e.(\hat{R}_i) = \underbrace{(\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\hat{\sigma}_k^2 / \hat{f}_k^2}{\hat{C}_{i,k}}}_{\text{Risco de Processo } (\text{Var}_{proc})} + \underbrace{(\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\hat{\sigma}_k^2 / \hat{f}_k^2}{S_k}}_{\text{Risco de Parâmetro } (\text{Var}_{param})}$$
+$$m.s.e.(\hat{R}_i) = \underbrace{(\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\hat{\sigma}_k^2 / \hat{f}_k^2}{\hat{C}_{i,k}}}_{\text{Risco de Processo } (\text{Var}_{\text{proc}})} + \underbrace{(\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\hat{\sigma}_k^2 / \hat{f}_k^2}{S_k}}_{\text{Risco de Parâmetro } (\text{Var}_{\text{param}})}$$
 
 #### 1. Risco de Processo (*Process Risk*)
 * **Conceito:** Variabilidade estocástica intrínseca à realização futura dos sinistros. Mesmo que o atuário soubesse com certeza absoluta os verdadeiros multiplicadores populacionais $f_k$, os pagamentos futuros ainda oscilariam em torno da média esperada.
@@ -276,13 +214,13 @@ $$m.s.e.(\hat{R}_i) = \underbrace{(\hat{C}_{i,n})^2 \sum_{k=I_i}^{n-1} \frac{\ha
 
 ---
 
-### 7.5 Covariância entre Safras e Erro Padrão Total Consolidado
+### 5.4 Covariância entre Safras e Erro Padrão Total Consolidado
 
 Ao avaliar a solvência de uma seguradora, é imprescindível calcular a volatilidade da **provisão total da carteira**:
-$$\hat{R}_{total} = \sum_{i=2}^n \hat{R}_i$$
+$$\hat{R}_{\text{total}} = \sum_{i=2}^n \hat{R}_i$$
 
 O erro médio quadrático agregado é dado por (Mack, 1993, Teorema 2):
-$$m.s.e.(\hat{R}_{total}) = \sum_{i=2}^n m.s.e.(\hat{R}_i) + 2 \sum_{2 \le i < k \le n} \widehat{\text{Cov}}(\hat{C}_{i,n}, \hat{C}_{k,n})$$
+$$m.s.e.(\hat{R}_{\text{total}}) = \sum_{i=2}^n m.s.e.(\hat{R}_i) + 2 \sum_{2 \le i < k \le n} \widehat{\text{Cov}}(\hat{C}_{i,n}, \hat{C}_{k,n})$$
 
 #### Por que Safras Independentes têm Provisões Correlacionadas?
 Pela Hipótese 2, as safras $i$ e $k$ geram sinistros independentes na realidade física. Entretanto, ao projetarmos seus desenvolvimentos futuros, **ambas utilizam os mesmos fatores estimados $\hat{f}_j$** calculados sobre a base histórica comum.
@@ -296,41 +234,82 @@ Os períodos futuros comuns a ambas as safras ocorrem a partir de $j = \max(I_i,
 $$\widehat{\text{Cov}}(\hat{C}_{i,n}, \hat{C}_{k,n}) = \hat{C}_{i,n} \cdot \hat{C}_{k,n} \sum_{j = \max(I_i, I_k)}^{n-1} \frac{\hat{\sigma}_j^2}{\hat{f}_j^2 \cdot S_j}$$
 
 > **Propriedade Fundamental:**  
-> Observe que a fórmula da covariância contém **apenas** o termo de risco de parâmetro $\frac{1}{S_j}$, e **nenhum** termo de risco de processo. Isso ocorre porque os processos geradores de sinistros futuros são independentes entre as safras; toda a correlação entre as provisões decorre exclusivamente do erro de estimação dos parâmetros compartilhados!
-
-#### Indicadores Totais da Carteira
-* **Erro Padrão Total:** $s.e.(\hat{R}_{total}) = \sqrt{m.s.e.(\hat{R}_{total})}$.
-* **Coeficiente de Variação Total:** $CV_{total} = \frac{s.e.(\hat{R}_{total})}{\hat{R}_{total}} \times 100\%$.
-* **Intervalo de Confiança Aproximado (95% - Normalidade Assintótica):**
-  $$[\hat{R}_{total} - 1.96 \cdot s.e.(\hat{R}_{total}) \; ; \; \hat{R}_{total} + 1.96 \cdot s.e.(\hat{R}_{total})]$$
-  *(Para provisões com distribuição assimétrica, pode-se ajustar distribuição Log-Normal com base na média e variância de Mack).*
+> A fórmula da covariância contém **apenas** o termo de risco de parâmetro $\frac{1}{S_j}$, e **nenhum** termo de risco de processo. Isso ocorre porque os processos geradores de sinistros futuros são independentes entre as safras; toda a correlação entre as provisões decorre exclusivamente do erro de estimação dos parâmetros compartilhados!
 
 ---
 
-## 8. Mapeamento dos Componentes do Código Python
+## 6. Dicionário de Dados Completo
 
-A implementação no arquivo [`src/chain_ladder.py`](file:///home/jose-eduardo/agente_antigravity/analise_sinistros/src/chain_ladder.py) traduz rigorosamente os conceitos determinísticos e estocásticos acima:
+Para referência em modelos de linguagem, relatórios e auditorias atuariais, a tabela abaixo consolida todas as variáveis manipuladas no motor de cálculo:
 
-| Conceito Atuarial | Símbolo Matemático | Método / Propriedade no Código | Descrição Operacional |
-| :--- | :---: | :--- | :--- |
-| Triângulo Acumulado | $C_{i,j}$ | `triangle_original` | DataFrame padronizado com linhas=ocorrência e colunas=desenvolvimento. |
-| Fator de Desenvolvimento | $f_j$ | `calculate_development_factors()` / `individual_factors` | Estimador BLUE ponderado por volume entre colunas consecutivas. |
-| Fator Acumulado / CDF | $F_j$ | `calculate_cumulative_factors()` / `cumulative_factors` | Produtório reverso de $f_j$ até a maturidade final, com cauda prudencial. |
-| Fator de Cauda | $f_{\text{tail}}$ | `tail_factor` | Expansão além do último estágio observado (default=1.0). |
-| Triângulo Projetado | $\hat{C}_{i,j}$ | `project_triangle()` / `projected_triangle` | Preenche células inferiores ($i+j-1 > n$) com a recursão $\hat{C}_{prev} \times f_j$. |
-| Sinistro Final | $\hat{U}_i$ | `calculate_ibnr()['Sinistro_Final_Ultimate']` | Produto do último valor observado na linha pelo respectivo $F_j$. |
-| Provisão de IBNR | $\text{IBNR}_i$ | `calculate_ibnr()['Provisao_IBNR']` | Diferença entre o Sinistro Final Estimado e o último valor observado. |
-| Variância Residual Mack | $\hat{\sigma}_j^2$ | `calculate_sigma_squared()` / `sigma_squared` | Variâncias residuais ponderadas com extrapolação automática para $j=n-1$. |
-| Desvio Padrão Residual | $\hat{\sigma}_j$ | `sigma` | Raiz quadrada de $\hat{\sigma}_j^2$. |
-| Decomposição de Risco | $\text{Var}_{proc}, \text{Var}_{param}$ | `calculate_mack_origin_mse()` / `mack_origin_summary` | Separação quantitativa por safra entre Risco de Processo e Parâmetro. |
-| Erro Padrão por Safra | $s.e.(\hat{R}_i)$ | `mack_origin_summary['Erro_Padrao_se']` | Raiz quadrada do MSE individual de predição de cada ano de ocorrência. |
-| Coeficiente de Variação | $CV_i$ | `mack_origin_summary['CV_pct']` | Razão percentual $s.e.(\hat{R}_i) / \hat{R}_i$. |
-| Matriz de Covariância | $\text{Cov}(\hat{R}_i, \hat{R}_k)$ | `calculate_mack_covariance_matrix()` / `mack_covariance_matrix` | Matriz $n \times n$ com MSEs na diagonal e covariâncias cruzadas fora da diagonal. |
-| MSE Total Consolidado | $m.s.e.(\hat{R}_{total})$ | `total_mack_mse` | Soma escalar de todos os elementos da matriz de covariância. |
-| Erro Padrão Total | $s.e.(\hat{R}_{total})$ | `total_mack_se` | Incerteza total da provisão agregada da carteira. |
-| CV Total da Carteira | $CV_{total}$ | `total_mack_cv` | Razão percentual $s.e.(\hat{R}_{total}) / \hat{R}_{total}$. |
-| Tabela Resumo Mack | — | `summary_mack()` | DataFrame completo consolidando Safra, Observado, $F_j$, Ultimate, IBNR, $s.e.$ e $CV$. |
-| Relatório Formatado | — | `format_results()` | Emissão textual rica de todas as seções determinísticas e estocásticas. |
+| Variável / Campo | Tipo de Dado | Notação Matemática | Unidade / Formato | Descrição Técnica & Atuarial |
+| :--- | :---: | :---: | :---: | :--- |
+| `origin_years` | Lista / Array | $i \in \{1, \dots, n\}$ | Rótulo / Ano | Anos ou períodos de ocorrência dos sinistros (linhas do triângulo). |
+| `dev_periods` | Lista / Array | $j \in \{1, \dots, n\}$ | Rótulo / Período | Períodos de desenvolvimento ou maturação (colunas do triângulo). |
+| `triangle_original` | Matriz 2D | $C_{i, j}$ | Monetário (R$) | Triângulo de desenvolvimento de sinistros acumulados históricos observados. |
+| `tail_factor` | Float | $f_{\text{tail}}$ | Adimensional ($\ge 1.0$) | Fator de cauda para desenvolvimento residual pós-período $n$. |
+| `individual_factors` | Vetor | $f_j$ | Razão / Multiplicador | Fatores de transição idade-para-idade entre as maturidades $j$ e $j+1$. |
+| `cumulative_factors` | Vetor | $F_j$ (CDF) | Razão / Multiplicador | Fatores acumulados do estágio $j$ até o custo final (*Ultimate*). |
+| `projected_triangle` | Matriz 2D | $\hat{C}_{i, j}$ | Monetário (R$) | Triângulo preenchido com as projeções determinísticas de Chain Ladder. |
+| `Ultimo_Sinistro_Obs` | Vetor | $C_{i, I_i}$ | Monetário (R$) | Posição financeira observada na data base mais recente da safra $i$. |
+| `Sinistro_Final_Ultimate` | Vetor | $\hat{U}_i$ ou $\hat{C}_{i, n}$ | Monetário (R$) | Custo final estimado dos sinistros após desenvolvimento completo. |
+| `Provisao_IBNR` | Vetor | $\text{IBNR}_i$ ou $\hat{R}_i$ | Monetário (R$) | Montante de reserva requerido para a safra $i$ ($\hat{U}_i - C_{i, I_i}$). |
+| `sigma_squared` | Vetor | $\hat{\sigma}_j^2$ | Variância | Variância residual condicional por coluna de desenvolvimento. |
+| `sigma` | Vetor | $\hat{\sigma}_j$ | Desvio Padrão | Desvio padrão residual condicional ($\sqrt{\hat{\sigma}_j^2}$). |
+| `Risco_Processo_Var` | Vetor | $\text{Var}_{\text{proc}}(\hat{R}_i)$ | Variância (R$^2$) | Componente de aleatoriedade intrínseca futura do sinistro da safra $i$. |
+| `Risco_Parametro_Var` | Vetor | $\text{Var}_{\text{param}}(\hat{R}_i)$ | Variância (R$^2$) | Componente de incerteza amostral dos multiplicadores $f_j$ da safra $i$. |
+| `MSE` | Vetor | $m.s.e.(\hat{R}_i)$ | Variância (R$^2$) | Erro médio quadrático de predição total da safra $i$. |
+| `Erro_Padrao_se` | Vetor | $s.e.(\hat{R}_i)$ | Monetário (R$) | Erro padrão da estimativa da reserva da safra $i$ ($\sqrt{m.s.e.}$). |
+| `CV_pct` | Vetor | $CV_i$ | Percentual (%) | Coeficiente de variação relativo da provisão da safra ($s.e. / \text{IBNR}$). |
+| `covariance_matrix` | Matriz $n \times n$ | $\widehat{\text{Cov}}(\hat{R}_i, \hat{R}_k)$ | Variância / Covariância | Matriz com MSEs na diagonal e covariâncias cruzadas fora da diagonal. |
+| `total_mack_mse` | Float | $m.s.e.(\hat{R}_{\text{total}})$ | Variância (R$^2$) | MSE agregado da carteira considerando todas as covariâncias entre safras. |
+| `total_mack_se` | Float | $s.e.(\hat{R}_{\text{total}})$ | Monetário (R$) | Erro padrão consolidado da provisão agregada de IBNR da entidade. |
+| `total_mack_cv` | Float | $CV_{\text{total}}$ | Percentual (%) | Coeficiente de variação consolidado da carteira ($s.e. / \text{IBNR}_{\text{total}}$). |
+
+---
+
+## 7. Interpretação Prática sob a Regulação SUSEP e IFRS 17
+
+### 7.1 Requisitos da SUSEP (Circular nº 643/2021 & Resolução CNSP nº 321/2015)
+1. **Obrigatoriedade de Métodos Atuariais Reconhecidos:**  
+   O Chain Ladder e o modelo de Mack são metodologias padrão de mercado para apuração do IBNR e validação de suficiência das provisões de sinistros a liquidar.
+2. **Monitoramento da Volatilidade e Teste de Consistência (Run-Off Test):**  
+   A SUSEP exige que as seguradoras avaliem periodicamente se suas reservas históricas foram suficientes para cobrir as liquidações reais subsequentes. O erro padrão de Mack ($s.e.$) serve como balizador objetivo: se a diferença entre a reserva constituída e a realidade for recorrentemente superior a $2 \cdot s.e.$, há indício de deficiência estrutural de parametrização.
+
+### 7.2 Norma Internacional IFRS 17 (*Insurance Contracts*)
+Sob o IFRS 17, a mensuração do passivo de sinistros incorridos (*Liability for Incurred Claims - LIC*) é estruturada em blocos:
+
+$$\text{LIC} = \text{Best Estimate Liabilities (BEL)} + \text{Risk Adjustment (RA)} + \text{Efeito do Desconto Financeiro (se relevante)}$$
+
+* **Best Estimate Liabilities (BEL):** O valor pontual da provisão de IBNR apurado pelo Chain Ladder ponderado por volume representa o valor esperado neutro ao risco dos fluxos de caixa futuros.
+* **Risk Adjustment for Non-Financial Risk (RA):** O modelo estocástico de Mack fornece a medida analítica exata da incerteza não-financeira ($s.e.(\hat{R}_{\text{total}})$). O RA pode ser calculado diretamente pelo método de *Cost of Capital* ou pela técnica de *Value at Risk (VaR)*:
+  $$\text{RA}_{\alpha} = z_{\alpha} \cdot s.e.(\hat{R}_{\text{total}})$$
+  onde $z_{\alpha}$ é o quantil da distribuição normal ou log-normal correspondente ao nível de confiança pretendido pela governança da seguradora (por exemplo, 75% ou 90%).
+
+---
+
+## 8. Fluxo Operacional: Sincronização Google Drive & NotebookLM
+
+Para manter este repositório perfeitamente sincronizado com bases de conhecimento no **Google Drive** e no **Google NotebookLM**, siga o fluxo operacional abaixo:
+
+### Passo 1: Localização e Estrutura de Arquivos
+* O arquivo mestre de conhecimento é o [`docs/notebooklm_contexto.md`](file:///home/jose-eduardo/agente_antigravity/analise_sinistros/docs/notebooklm_contexto.md).
+* Ele foi redigido com formatação GFM (*GitHub Flavored Markdown*) e equações LaTeX, o que garante renderização nativa de alta fidelidade no NotebookLM.
+
+### Passo 2: Sincronização com o Google Drive
+* **Opção 1 (Google Drive para Desktop):** Se você utiliza o cliente oficial do Google Drive montado em sua máquina, crie um link simbólico ou copie os arquivos da pasta `docs/` para a pasta do Drive:
+  ```bash
+  # Exemplo de cópia para pasta do Drive montada
+  cp docs/notebooklm_contexto.md ~/GoogleDrive/Atuaria_UFMG/analise_sinistros/
+  ```
+* **Opção 2 (Upload Manual ou via Web):** Faça o upload de `docs/notebooklm_contexto.md` diretamente para a pasta do seu projeto no Google Drive.
+
+### Passo 3: Criação da Fonte de Conhecimento no NotebookLM
+1. Acesse o **Google NotebookLM** ([notebooklm.google.com](https://notebooklm.google.com/)).
+2. Crie um novo caderno de estudos: *"Atuária Quant - Provisões Técnicas & Mack (1993)"*.
+3. Clique em **"Adicionar Fonte"** e selecione **Google Drive** (ou faça upload do arquivo `.md`).
+4. Selecione o arquivo `notebooklm_contexto.md`.
+5. O NotebookLM indexará instantaneamente todo o sumário conceitual, fórmulas, premissas de independência e tabelas explicativas, permitindo geração de resumos executivos, guias de estudo, áudios explicativos (*Audio Overviews*) e respostas técnicas fundamentadas.
 
 ---
 
@@ -348,12 +327,14 @@ A implementação no arquivo [`src/chain_ladder.py`](file:///home/jose-eduardo/a
 ### P4: Por que a covariância entre safras nunca é negativa no modelo de Mack?
 **R:** Porque a covariância é gerada exclusivamente pelo uso dos mesmos multiplicadores $\hat{f}_j$. Como todos os volumes de sinistros observados $S_j$ e variâncias $\hat{\sigma}_j^2$ são não negativos, o termo $\frac{\hat{\sigma}_j^2}{\hat{f}_j^2 \cdot S_j}$ é estritamente $\ge 0$. Logo, qualquer perturbação positiva em $\hat{f}_j$ aumenta as projeções de todas as safras que necessitam passar por esse período de desenvolvimento.
 
-### P5: Por que o Coeficiente de Variação da carteira total ($CV_{total}$) é menor que o das safras recentes?
+### P5: Por que o Coeficiente de Variação da carteira total ($CV_{\text{total}}$) é menor que o das safras recentes?
 **R:** Esse é o efeito clássico de **diversificação atuarial**. Como os riscos de processo entre anos de ocorrência distintos são descorrelacionados, as flutuações aleatórias individuais tendem a se compensar parcialmente na agregação, reduzindo a variabilidade percentual da carteira em relação à provisão total.
 
 ### P6: Como o atuário utiliza o erro padrão de Mack sob as normas da SUSEP e do IFRS 17?
 **R:** No **IFRS 17**, a provisão para sinistros incorridos (*Liability for Incurred Claims - LIC*) é dividida entre o Fluxo de Caixa Estimado (*Best Estimate Liabilities - BEL*) e o Ajuste de Risco Não Financeiro (*Risk Adjustment - RA*). O método de Mack fornece a estimativa do BEL (a provisão clássica de IBNR) e a base estocástica exata ($s.e.$) para calcular o *Risk Adjustment* em níveis de confiança prudenciais (por exemplo, percentil 75% ou 90% via Value at Risk / VaR).
 
 ---
-*Documento preparado como fonte de conhecimento técnico e atuarial para agentes autônomos e modelos de linguagem no NotebookLM.*
 
+<p align="center">
+  <em>Dossiê preparado para Ciências Atuariais - UFMG | Referência para NotebookLM e Gestão Documental via Google Drive.</em>
+</p>
