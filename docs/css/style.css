@@ -1,0 +1,116 @@
+/* Estilos Customizados para Atuária Quant - Mack & Chain Ladder */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --color-quant-dark: #080c14;
+  --color-quant-card: #0f172a;
+  --color-quant-border: #1e293b;
+  --color-quant-accent: #3b82f6;
+  --color-quant-emerald: #10b981;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--color-quant-dark);
+  color: #f1f5f9;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-feature-settings: 'tnum' on, 'zero' on;
+}
+
+/* Scrollbar Customizada */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #080c14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Glassmorphism e Bordas */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+.glass-panel-hover:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease-in-out;
+}
+
+/* Células Projetadas no Triângulo */
+.cell-projected {
+  background-color: rgba(16, 185, 129, 0.08);
+  color: #34d399;
+  font-weight: 500;
+  border: 1px dashed rgba(16, 185, 129, 0.3) !important;
+}
+
+.cell-observed {
+  background-color: rgba(30, 41, 59, 0.3);
+  color: #f8fafc;
+}
+
+.cell-empty {
+  background-color: rgba(15, 23, 42, 0.4);
+  color: #475569;
+}
+
+/* Badges e Tags */
+.badge-proj {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Tabelas */
+.table-actuarial th {
+  background-color: #0b1120;
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.table-actuarial td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.6);
+  font-size: 0.8125rem;
+}
+
+.table-actuarial tr:hover td {
+  background-color: rgba(30, 41, 59, 0.4);
+}
+
+/* Gráficos Plotly */
+.js-plotly-plot .plotly .modebar {
+  right: 10px !important;
+  top: 5px !important;
+}
+
+/* Efeito de Destaque Pulsante */
+@keyframes subtle-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.pulse-indicator {
+  animation: subtle-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
